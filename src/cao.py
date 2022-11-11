@@ -8,6 +8,7 @@ bert = BertModel.from_pretrained("bert-base-uncased")
 max_len = 512
 texts = [
     "Masked Language Modeling works by inserting a mask token at the desired position where you want to predict the best candidate word that would go in that position. You can simply insert the mask token by concatenating it at the desired position in your input like I did above. ",
+    "Masked Language Modeling works by inserting a mask token at the desired position where you want to predict the best candidate word that would go in that position. You can simply insert the mask token by concatenating it at the desired position in your input like I did above. ",
     "Next Sentence prediction is the task of predicting how good a sentence is a next sentence for a given sentence. In this case, “The child came home from school.” is the given sentence and we are trying to predict whether “He played soccer after school.” is the next sentence. "
     ]
 
