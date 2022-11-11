@@ -66,6 +66,7 @@ class AutoEncoder(nn.Module):
     def get_latent_emb(self, x):            
         z = self.encoder(x)
         z = F.normalize(z, dim=-1)
+        print(z.shape)
         return z        
 
     def forward(self, x):
@@ -159,9 +160,12 @@ class HeClusTopicModel(nn.Module):
         return valid_ids_set, co_matrix, avg_latent_embs, cluster_ids
 
 
-    def get_latent_emb(self, input_ids, attention_mask):
+    def get_latent_emb(self, input_ids, attention_mask, valid_pos=None):
         last_hidden_states = self.bert_encode(input_ids, attention_mask)
-        latent_embs = self.ae.get_latent_emb(last_hidden_states)
+        if valid_pos is not None:
+            latent_embs = self.ae.get_latent_emb(last_hidden_states[valid_pos])
+        else:
+            latent_embs = self.ae.get_latent_emb(last_hidden_states)
         return latent_embs
 
     
