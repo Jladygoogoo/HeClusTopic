@@ -92,7 +92,6 @@ class HeClusTopicModel(nn.Module):
             attention_mask:torch.Tensor, 
         ):
         # TODO: BERT embedding calculation reconsider
-        print("bert encode")
         bert_outputs = self.bert(input_ids, attention_mask=attention_mask)
         last_hidden_states = bert_outputs[0]
         return last_hidden_states

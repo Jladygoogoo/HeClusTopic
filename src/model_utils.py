@@ -56,7 +56,6 @@ class HeClusTopicModelUtils:
             train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
             parameters = filter(lambda p: p.requires_grad, ae.parameters())
             optimizer = torch.optim.Adam(parameters, self.config.lr)
-            utils.check_gpu_mem_usedRate()
             for epoch in range(self.config.n_pre_epochs):
                 total_loss = 0
                 for batch in tqdm(train_dataloader):
@@ -64,7 +63,6 @@ class HeClusTopicModelUtils:
                     input_ids = batch[0].to(self.device)
                     attention_mask = batch[1].to(self.device)
                     x = self.model.bert_encode(input_ids, attention_mask)
-                    utils.check_gpu_mem_usedRate()
                     x_rec = ae(x)
                     loss = F.mse_loss(x, x_rec)
                     loss.backward()
@@ -104,10 +102,8 @@ class HeClusTopicModelUtils:
         model.kmeans.init_cluster(latent_embs.numpy(), latent_embs=freq.numpy())
 
     def train(self):
-        utils.check_gpu_mem_usedRate()
         self._init_model()
         self.model.to(self.device)
-        utils.check_gpu_mem_usedRate()
         self._pretrain_ae()
         self._pre_clustering()
 
@@ -147,8 +143,6 @@ if __name__ == '__main__':
     # parser.add_argument('--kappa', default=10, type=float, help='concentration parameter kappa')
     # parser.add_argument('--hidden_dims', default='[500, 500, 1000, 100]', type=str)
     parser.add_argument('--train', action='store_true')
-    parser.add_argument('--do_inference', action='store_true')
-    parser.add_argument('--do_attn_check', action='store_true')
     parser.add_argument('--cluster_weight', default=0.1, type=float, help='weight of clustering loss')
     parser.add_argument('--emb_weight', default=0.0, type=float, help='weight of document embedding reconstruct loss')
     parser.add_argument('--bow_weight', default=1.0, type=float, help='weight of document bow reconstruct loss')
