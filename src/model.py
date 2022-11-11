@@ -161,9 +161,8 @@ class HeClusTopicModel(nn.Module):
 
     def get_latent_emb(self, input_ids, attention_mask, valid_pos):
         last_hidden_states = self.bert_encode(input_ids, attention_mask)
-        latent_embs = self.encoder(last_hidden_states[valid_pos])
+        latent_embs = self.ae.encoder(last_hidden_states[valid_pos])
         return latent_embs
-
 
     
     def get_loss(self, co_matrix, latent_embs, cluster_ids):
