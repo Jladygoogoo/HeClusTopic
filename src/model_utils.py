@@ -69,6 +69,8 @@ class HeClusTopicModelUtils:
                     optimizer.step()
                     total_loss += loss.item()
                 utils.print_log(f"epoch {epoch}: loss = {total_loss / (self.config.batch_size):.4f}")
+            torch.save(ae.state_dict(), ae_model_path)
+            utils.print_log("Save pretrained AutoEncoder model to: {}".format(ae_model_path))
         utils.print_log("AutoEncoder pretrain finished.")
 
 
