@@ -81,7 +81,8 @@ class HeClusTopicModelUtils:
             latent_embs, freq = torch.load(init_latent_emb_path)
         else:
             model = self.model.to(self.device)
-            dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
+            # dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
+            dataloader = DataLoader(self.dataset, batch_size=16)
             model.eval()
             latent_embs = torch.zeros((len(self.vocab), self.config.latent_dim)).to(self.device)
             freq = torch.zeros(len(self.vocab), dtype=int).to(self.device)

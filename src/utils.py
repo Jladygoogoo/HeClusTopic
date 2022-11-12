@@ -23,7 +23,7 @@ def _parallel_compute_distance(X, cluster):
     return dis_mat
 
 
-def create_dataset(dataset_dir, text_file="text.txt", max_len=512):
+def create_dataset(dataset_dir, text_file="texts.txt", max_len=512):
     data_file = os.path.join(dataset_dir, "data.pkl")
     if os.path.exists(data_file):
         print_log("Loading encoded texts from {}".format(data_file))
