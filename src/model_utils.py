@@ -26,7 +26,7 @@ class MyDataset(Dataset):
 
 class HeClusTopicModelUtils:
     def __init__(self, config) -> None:
-        self.device = utils.get_device()
+        self.device = utils.get_device(config.device)
         config.device = self.device
         utils.print_log("Use device: {}".format(self.device))
         self.config = config
@@ -134,6 +134,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=21)
+    parser.add_argument('--device', type=int, default=0)
     parser.add_argument('--dataset', default='20news')
     parser.add_argument('--batch_size', type=int, default=256)
     parser.add_argument('--lr', type=float, default=5e-4)
