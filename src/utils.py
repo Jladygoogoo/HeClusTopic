@@ -123,5 +123,10 @@ def check_gpu_mem_usedRate():
     print(f"GPU0 used: {used}, tot: {tot}, 使用率：{used/tot}")
 
 
+def freeze_parameters(paramters):
+    for p in paramters:
+        p.requires_grad = False
+
+
 if __name__ == "__main__":
     check_gpu_mem_usedRate()

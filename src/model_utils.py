@@ -54,6 +54,9 @@ class HeClusTopicModelUtils:
             ae.load_state_dict(torch.load(os.path.join(self.data_dir, "ae.pt")))
         else:
             train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
+            # freeze BERT parameters when pretraining Autoencoder
+            utils.freeze_parameters(self.model.bert.parameters())
+            self.model.bert.eval()
             parameters = filter(lambda p: p.requires_grad, ae.parameters())
             optimizer = torch.optim.Adam(parameters, self.config.lr)
             for epoch in range(self.config.n_pre_epochs):
@@ -80,10 +83,11 @@ class HeClusTopicModelUtils:
             utils.print_log(f"Loading initial latent embeddings from {init_latent_emb_path}.")
             latent_embs, freq = torch.load(init_latent_emb_path)
         else:
-            model = self.model.to(self.device)
-            # dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
-            dataloader = DataLoader(self.dataset, batch_size=16)
-            model.eval()
+            # freeze model parameters when acquire latent embeddings
+            utils.freeze_parameters(self.model.parameters())
+            self.model.bert.eval()
+            dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
+            # model.eval()
             latent_embs = torch.zeros((len(self.vocab), self.config.latent_dim)).to(self.device)
             freq = torch.zeros(len(self.vocab), dtype=int).to(self.device)
             with torch.no_grad():
@@ -91,7 +95,7 @@ class HeClusTopicModelUtils:
                     input_ids = batch[0].to(self.device)
                     attention_mask = batch[1].to(self.device)
                     valid_pos = batch[2].to(self.device)
-                    latent_emb = model.get_latent_emb(input_ids, attention_mask, valid_pos)
+                    latent_emb = self.model.get_latent_emb(input_ids, attention_mask, valid_pos)
                     valid_ids = input_ids[valid_pos != 0]
                     latent_embs.index_add_(0, valid_ids, latent_emb)
                     freq.index_add_(0, valid_ids, torch.ones_like(valid_ids))
@@ -102,7 +106,7 @@ class HeClusTopicModelUtils:
             torch.save((latent_embs, freq), init_latent_emb_path)
 
         utils.print_log(f"Running K-Means for initialization...")
-        model.kmeans.init_cluster(latent_embs.numpy(), latent_embs=freq.numpy())
+        self.model.kmeans.init_cluster(latent_embs.numpy(), latent_embs=freq.numpy())
 
     def train(self):
         self._init_model()
