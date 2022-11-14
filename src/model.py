@@ -29,7 +29,8 @@ class KmeansBatch:
     def init_cluster(self, X, sample_weight=None):
         """ Generate initial clusters using sklearn.Kmeans """
         model = KMeans(n_clusters=self.n_clusters)
-        model.fit(X, sample_weight=sample_weight)
+        model.fit(X)
+        # model.fit(X, sample_weight=sample_weight)
         self.cluster_centers = model.cluster_centers_  # copy clusters
         self.is_init = True
 
@@ -183,7 +184,8 @@ class HeClusTopicModel(nn.Module):
             kmeans_loss += 0.5 * torch.squeeze(sample_dist_loss)  
 
         # co-occur loss
-        # TODO
+        
+
         loss = {
             "kmeans_loss": kmeans_loss,
             "total_loss": kmeans_loss
