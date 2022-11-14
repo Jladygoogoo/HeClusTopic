@@ -27,8 +27,8 @@ class KmeansBatch:
 
     def init_cluster(self, X, sample_weight=None):
         """ Generate initial clusters using sklearn.Kmeans """
-        model = KMeans(n_clusters=self.n_clusters, sample_weight=sample_weight)
-        model.fit(X)
+        model = KMeans(n_clusters=self.n_clusters)
+        model.fit(X, sample_weight=sample_weight)
         self.cluster_centers = model.cluster_centers_  # copy clusters
 
     def update_cluster(self, X, cluster_idx):

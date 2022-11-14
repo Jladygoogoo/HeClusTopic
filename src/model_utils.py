@@ -84,7 +84,7 @@ class HeClusTopicModelUtils:
             latent_embs, freq = torch.load(init_latent_emb_path)
         else:
             # freeze model parameters when acquire latent embeddings
-            utils.freeze_parameters(self.model.parameters())
+            # utils.freeze_parameters(self.model.parameters())
             self.model.bert.eval()
             dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
             # model.eval()
@@ -106,7 +106,7 @@ class HeClusTopicModelUtils:
             torch.save((latent_embs, freq), init_latent_emb_path)
 
         utils.print_log(f"Running K-Means for initialization...")
-        self.model.kmeans.init_cluster(latent_embs.numpy(), latent_embs=freq.numpy())
+        self.model.kmeans.init_cluster(latent_embs.numpy(), sample_weight=freq.numpy())
 
     def train(self):
         self._init_model()
@@ -116,7 +116,7 @@ class HeClusTopicModelUtils:
 
         train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
         optimizer = torch.optim.Adam(self.model.parameters(), self.config.lr)
-        for epoch in range(len(self.config.n_epochs)):
+        for epoch in range(self.config.n_epochs):
             total_loss = 0
             for batch in tqdm(train_dataloader):
                 optimizer.zero_grad()
