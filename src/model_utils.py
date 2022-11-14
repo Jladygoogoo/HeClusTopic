@@ -102,8 +102,8 @@ class HeClusTopicModelUtils:
                 valid_ids = input_ids[valid_pos != 0]
                 latent_embs.index_add_(0, valid_ids, latent_emb)
                 freq.index_add_(0, valid_ids, torch.ones_like(valid_ids))
-        latent_embs = latent_embs[freq > 0].cpu()
-        freq = freq[freq > 0].cpu()
+        latent_embs = latent_embs[freq > 0]
+        freq = freq[freq > 0]
         latent_embs = latent_embs / freq.unsqueeze(-1)
         if return_freq == True:
             return latent_embs, freq
@@ -162,7 +162,7 @@ class HeClusTopicModelUtils:
             utils.print_log("Epoch-{}: total loss={:.4f} | kmeans loss={:.4f} | co loss={:.4f}".format(
                 epoch, total_loss/batch_size, kmeans_loss/batch_size, co_loss/batch_size
             ))
-            if (epoch+1) % 3:
+            if (epoch+1) % 1 == 0:
                 self.show_clusters()
         # torch.save(self.model.state_dict(), pretrained_path)
         # utils.print_log(f"Pretrained model saved to {pretrained_path}")
@@ -176,7 +176,7 @@ class HeClusTopicModelUtils:
         if self.model.kmeans.is_init == False:
             utils.print_log("None. Kmeans should be initiated first.")
         latent_embs, freq = self.get_vocab_emb()
-        labels = self.model.kmeans.assign_cluster(latent_embs.numpy())
+        labels = self.model.kmeans.assign_cluster(latent_embs)
         print(labels.shape)
         label_2_vids = {}
         for i, label in enumerate(labels):
