@@ -16,6 +16,7 @@ class KmeansBatch:
         self.n_clusters = config.n_clusters
         self.cluster_centers = np.zeros((self.n_clusters, self.n_features))
         self.count = 100 * np.ones((self.n_clusters))  # serve as learning rate
+        self.is_init = False
 
     def _compute_dist(self, X):
         dis_mat = Parallel(n_jobs=1)(
@@ -30,6 +31,7 @@ class KmeansBatch:
         model = KMeans(n_clusters=self.n_clusters)
         model.fit(X, sample_weight=sample_weight)
         self.cluster_centers = model.cluster_centers_  # copy clusters
+        self.is_init = True
 
     def update_cluster(self, X, cluster_idx):
         """ Update clusters in Kmeans on a batch of data """

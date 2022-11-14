@@ -32,6 +32,7 @@ class HeClusTopicModelUtils:
         self.config = config
         tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
         self.vocab = tokenizer.get_vocab()        
+        self.inv_vocab = {v:k for k, v in self.vocab.items()}
         self.model = None
         self.data_dir = "datasets/{}".format(self.config.dataset)
         self._load_dataset()
@@ -76,6 +77,31 @@ class HeClusTopicModelUtils:
             utils.print_log("Save pretrained AutoEncoder model to: {}".format(ae_model_path))
         utils.print_log("AutoEncoder pretrain finished.")
 
+    
+    def get_vocab_emb(self, return_freq=True):
+        '''
+        Get vocab's average embeddings based on current model.
+        '''
+        self.model.bert.eval()
+        dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
+        latent_embs = torch.zeros((len(self.vocab), self.config.latent_dim)).to(self.device)
+        freq = torch.zeros(len(self.vocab), dtype=int).to(self.device)
+        with torch.no_grad():
+            for batch in tqdm(dataloader):
+                input_ids = batch[0].to(self.device)
+                attention_mask = batch[1].to(self.device)
+                valid_pos = batch[2].to(self.device)
+                latent_emb = self.model.get_latent_emb(input_ids, attention_mask, valid_pos)
+                valid_ids = input_ids[valid_pos != 0]
+                latent_embs.index_add_(0, valid_ids, latent_emb)
+                freq.index_add_(0, valid_ids, torch.ones_like(valid_ids))
+        latent_embs = latent_embs[freq > 0].cpu()
+        freq = freq[freq > 0].cpu()
+        latent_embs = latent_embs / freq.unsqueeze(-1)
+        if return_freq == True:
+            return latent_embs, freq
+        return latent_embs
+
 
     def _pre_clustering(self):
         init_latent_emb_path = os.path.join(self.data_dir, "init_latent_emb.pt")
@@ -83,36 +109,20 @@ class HeClusTopicModelUtils:
             utils.print_log(f"Loading initial latent embeddings from {init_latent_emb_path}.")
             latent_embs, freq = torch.load(init_latent_emb_path)
         else:
-            # freeze model parameters when acquire latent embeddings
-            # utils.freeze_parameters(self.model.parameters())
-            self.model.bert.eval()
-            dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
-            # model.eval()
-            latent_embs = torch.zeros((len(self.vocab), self.config.latent_dim)).to(self.device)
-            freq = torch.zeros(len(self.vocab), dtype=int).to(self.device)
-            with torch.no_grad():
-                for batch in tqdm(dataloader):
-                    input_ids = batch[0].to(self.device)
-                    attention_mask = batch[1].to(self.device)
-                    valid_pos = batch[2].to(self.device)
-                    latent_emb = self.model.get_latent_emb(input_ids, attention_mask, valid_pos)
-                    valid_ids = input_ids[valid_pos != 0]
-                    latent_embs.index_add_(0, valid_ids, latent_emb)
-                    freq.index_add_(0, valid_ids, torch.ones_like(valid_ids))
-            latent_embs = latent_embs[freq > 0].cpu()
-            freq = freq[freq > 0].cpu()
-            latent_embs = latent_embs / freq.unsqueeze(-1)
+            latent_embs, freq = self.get_vocab_emb()
             utils.print_log(f"Saving initial embeddings to {init_latent_emb_path}.")
             torch.save((latent_embs, freq), init_latent_emb_path)
-
         utils.print_log(f"Running K-Means for initialization...")
         self.model.kmeans.init_cluster(latent_embs.numpy(), sample_weight=freq.numpy())
+
 
     def train(self):
         self._init_model()
         self.model.to(self.device)
         self._pretrain_ae()
         self._pre_clustering()
+        self.show_clusters()
+        return
 
         train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
         optimizer = torch.optim.Adam(self.model.parameters(), self.config.lr)
@@ -132,6 +142,28 @@ class HeClusTopicModelUtils:
         # torch.save(self.model.state_dict(), pretrained_path)
         # utils.print_log(f"Pretrained model saved to {pretrained_path}")
 
+
+    def show_clusters(self):
+        '''
+        Show vocab clustering results.
+        '''
+        utils.print_log("Showing clusters results...")
+        if self.model.kmeans.is_init == False:
+            utils.print_log("None. Kmeans should be initiated first.")
+        latent_embs, freq = self.get_vocab_emb()
+        labels = self.model.kmeans.assign_cluster(latent_embs.numpy())
+        label_2_vids = {}
+        for i, label in enumerate(labels):
+            if label in label_2_vids:
+                label_2_vids[label].append(i)
+            else:
+                label_2_vids[label] = [i]
+        for label, vids in label_2_vids.items():
+            print("=========== cluster-{} ===========".format(label))
+            tokens = [self.inv_vocab[vid] for vid in vids if vid not in self.data["filter_ids"]]
+            print(tokens)
+
+        
 
 if __name__ == '__main__':
 
