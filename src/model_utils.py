@@ -38,8 +38,8 @@ class HeClusTopicModelUtils:
         self._load_dataset()
 
     def _load_dataset(self):
-        data = utils.create_dataset(self.data_dir)
-        self.dataset = MyDataset(data["input_ids"], data["attention_masks"], data["valid_pos"])
+        self.data = utils.create_dataset(self.data_dir)
+        self.dataset = MyDataset(self.data["input_ids"], self.data["attention_masks"], self.data["valid_pos"])
 
     def _init_model(self, model_path=None):
         self.model = HeClusTopicModel(self.config)
@@ -152,6 +152,7 @@ class HeClusTopicModelUtils:
             utils.print_log("None. Kmeans should be initiated first.")
         latent_embs, freq = self.get_vocab_emb()
         labels = self.model.kmeans.assign_cluster(latent_embs.numpy())
+        print(labels.shape)
         label_2_vids = {}
         for i, label in enumerate(labels):
             if label in label_2_vids:
