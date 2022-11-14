@@ -120,7 +120,7 @@ class HeClusTopicModelUtils:
             utils.print_log(f"Saving initial embeddings to {init_latent_emb_path}.")
             torch.save((latent_embs, freq), init_latent_emb_path)
         utils.print_log(f"Running K-Means for initialization...")
-        self.model.kmeans.init_cluster(latent_embs.numpy()[:200], sample_weight=freq.numpy())
+        self.model.kmeans.init_cluster(latent_embs.numpy(), sample_weight=freq.numpy())
 
 
     def train(self):
@@ -158,10 +158,12 @@ class HeClusTopicModelUtils:
                 kmeans_loss += loss["kmeans_loss"].item()
                 co_loss += loss["co_loss"].item()
                 loss["total_loss"].backward()
-                optimizer.step()                
+                optimizer.step()              
             utils.print_log("Epoch-{}: total loss={:.4f} | kmeans loss={:.4f} | co loss={:.4f}".format(
                 epoch, total_loss/batch_size, kmeans_loss/batch_size, co_loss/batch_size
             ))
+            if (epoch+1) % 3:
+                self.show_clusters()
         # torch.save(self.model.state_dict(), pretrained_path)
         # utils.print_log(f"Pretrained model saved to {pretrained_path}")
 
