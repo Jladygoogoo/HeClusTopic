@@ -113,7 +113,7 @@ class HeClusTopicModel(nn.Module):
         batch_size = len(input_ids)
         valid_mask = valid_pos != 0
         last_hidden_states = self.bert_encode(input_ids, attention_mask)
-        latent_embs = self.encoder(last_hidden_states[valid_pos])
+        latent_embs = self.ae.encoder(last_hidden_states[valid_pos])
         valid_ids =  input_ids[valid_mask]
         valid_ids_set = list(set(valid_ids.view(-1).detach().cpu().numpy()))
         

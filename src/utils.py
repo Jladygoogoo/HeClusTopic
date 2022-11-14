@@ -51,12 +51,12 @@ def create_dataset(dataset_dir, text_file="texts.txt", max_len=512):
         print_log("Generate valid positions...")
         stop_words = set(stopwords.words('english'))
         filter_idx = []
-        valid_pos = ["NOUN", "VERB", "ADJ"]
+        valid_tag = ["NOUN", "VERB", "ADJ"]
         for i in inv_vocab:
             token = inv_vocab[i]
-            if token in stop_words or token.startswith('##') \
+            if len(token)<2 or token in stop_words or token.startswith('##') \
             or token in string.punctuation or token.startswith('[') \
-            or pos_tag([token], tagset='universal')[0][-1] not in valid_pos:
+            or pos_tag([token], tagset='universal')[0][-1] not in valid_tag:
                 filter_idx.append(i)
         valid_pos = attention_masks.clone()
         for i in filter_idx:
