@@ -1,4 +1,5 @@
 *.pkl
 *.pt
 *.txt
+*.mm*
 **/__pycache__

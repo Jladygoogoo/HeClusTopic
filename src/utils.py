@@ -25,11 +25,13 @@ def _parallel_compute_distance(X, cluster):
 
 def create_dataset(dataset_dir, text_file="texts.txt", max_len=512):
     data_file = os.path.join(dataset_dir, "data.pkl")
-    if os.path.exists(data_file):
+    bow_file = os.path.join(dataset_dir, "bows.mm")
+    if os.path.exists(data_file) and os.path.exists(bow_file):
         print_log("Loading encoded texts from {}".format(data_file))
         # data = torch.load(loader_file)
         with open(data_file, 'rb') as f:
             data = pickle.load(f)
+        bows = MmCorpus(bow_file)
         print_log("Loaeded.")
     else:
         print_log(f"Reading texts from {os.path.join(dataset_dir, text_file)}")
@@ -62,10 +64,22 @@ def create_dataset(dataset_dir, text_file="texts.txt", max_len=512):
         for i in filter_idx:
             valid_pos[input_ids == i] = 0
 
+        print_log("Constructing BOW into {}...".format(bow_file))
+        bows = []
+        for i in range(len(input_ids)):
+            bow = {}
+            for idx in input_ids[i]:
+                if idx in bow:
+                    bow[idx] += 1
+                else:
+                    bow[idx] = 1
+            bows.append(list(bow.items()))            
+
         data = {"input_ids": input_ids, "attention_masks": attention_masks, "valid_pos": valid_pos, "filter_ids": filter_idx}
         with open(data_file, 'wb') as f:
             pickle.dump(data, f)
-    return data   
+        MmCorpus.serialize(bow_file, bows)            
+    return data, bows
 
 
 def get_device(id_=0):
@@ -123,9 +137,19 @@ def check_gpu_mem_usedRate():
     print(f"GPU0 used: {used}, tot: {tot}, 使用率：{used/tot}")
 
 
-def freeze_parameters(paramters):
-    for p in paramters:
+def freeze_parameters(parameters):
+    for p in parameters:
         p.requires_grad = False
+
+def unfreeze_parameters(parameters):
+    for p in parameters:
+        p.requires_grad = True
+
+def calc_cosine_dist_torch(a, b):
+    a_norm = a / a.norm(dim=1)[:, None]
+    b_norm = b / b.norm(dim=1)[:, None]
+    res = torch.mm(a_norm, b_norm.transpose(0,1))    
+    return res
 
 
 if __name__ == "__main__":

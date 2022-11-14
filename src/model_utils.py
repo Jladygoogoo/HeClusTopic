@@ -11,14 +11,21 @@ import numpy as np
 
 
 class MyDataset(Dataset):
-    def __init__(self, input_ids, attention_mask, valid_pos) -> None:
+    def __init__(self, input_ids, attention_mask, valid_pos, bows, vocab_size) -> None:
         super().__init__()
         self.input_ids = input_ids
         self.attention_mask = attention_mask
         self.valid_pos = valid_pos
+        self.bows = bows
+        self.vocab_size = vocab_size
 
     def __getitem__(self, idx):
-        return self.input_ids[idx], self.attention_mask[idx], self.valid_pos[idx]
+        src_bow = self.bows[idx]
+        one_hot_bow = torch.zeros(self.vocab_size)
+        item = list(zip(*src_bow))
+        one_hot_bow[list(item[0])] = torch.tensor(list(item[1])).float()
+        # one_hot_bow[self.filter_ids] = 0        
+        return self.input_ids[idx], self.attention_mask[idx], self.valid_pos[idx], one_hot_bow
     
     def __len__(self):
         return len(self.input_ids)
@@ -38,8 +45,8 @@ class HeClusTopicModelUtils:
         self._load_dataset()
 
     def _load_dataset(self):
-        self.data = utils.create_dataset(self.data_dir)
-        self.dataset = MyDataset(self.data["input_ids"], self.data["attention_masks"], self.data["valid_pos"])
+        self.data, bows = utils.create_dataset(self.data_dir)
+        self.dataset = MyDataset(self.data["input_ids"], self.data["attention_masks"], self.data["valid_pos"], bows, len(self.vocab))
 
     def _init_model(self, model_path=None):
         self.model = HeClusTopicModel(self.config)
@@ -113,7 +120,7 @@ class HeClusTopicModelUtils:
             utils.print_log(f"Saving initial embeddings to {init_latent_emb_path}.")
             torch.save((latent_embs, freq), init_latent_emb_path)
         utils.print_log(f"Running K-Means for initialization...")
-        self.model.kmeans.init_cluster(latent_embs.numpy(), sample_weight=freq.numpy())
+        self.model.kmeans.init_cluster(latent_embs.numpy()[:200], sample_weight=freq.numpy())
 
 
     def train(self):
@@ -121,24 +128,40 @@ class HeClusTopicModelUtils:
         self.model.to(self.device)
         self._pretrain_ae()
         self._pre_clustering()
-        self.show_clusters()
-        return
+
+        utils.freeze_parameters(self.model.bert.parameters())
+        bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
+        utils.unfreeze_parameters(bert_params_for_finetune)
+        bert_params_ids = list(map(id, self.model.bert.parameters()))
+        other_params = list(filter(lambda p:id(p) not in bert_params_ids, self.model.parameters()))
 
         train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
-        optimizer = torch.optim.Adam(self.model.parameters(), self.config.lr)
+        optimizer = torch.optim.Adam([
+            {"params": bert_params_for_finetune, "lr": 1e-5},
+            {"params": other_params, "lr": self.config.lr}
+        ])
+        utils.print_log("Start training HeCluTopicModel...")
+        batch_size = self.config.batch_size
         for epoch in range(self.config.n_epochs):
             total_loss = 0
+            kmeans_loss = 0
+            co_loss = 0
             for batch in tqdm(train_dataloader):
                 optimizer.zero_grad()
                 input_ids = batch[0].to(self.device)
                 attention_mask = batch[1].to(self.device)
                 valid_pos = batch[2].to(self.device)
-                valid_ids_set, co_matrix, avg_latent_embs, cluster_ids = self.model(input_ids, attention_mask, valid_pos)
+                bow = batch[3].to(self.device)
+                valid_ids_set, co_matrix, avg_latent_embs, cluster_ids = self.model(input_ids, attention_mask, valid_pos, bow)
                 loss = self.model.get_loss(co_matrix, avg_latent_embs, cluster_ids)
                 total_loss += loss["total_loss"].item()
-                loss.backward()
+                kmeans_loss += loss["kmeans_loss"].item()
+                co_loss += loss["co_loss"].item()
+                loss["total_loss"].backward()
                 optimizer.step()                
-            utils.print_log(f"epoch {epoch}: loss = {total_loss / (self.config.batch_size):.4f}")
+            utils.print_log("Epoch-{}: total loss={:.4f} | kmeans loss={:.4f} | co loss={:.4f}".format(
+                epoch, total_loss/batch_size, kmeans_loss/batch_size, co_loss/batch_size
+            ))
         # torch.save(self.model.state_dict(), pretrained_path)
         # utils.print_log(f"Pretrained model saved to {pretrained_path}")
 

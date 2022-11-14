@@ -31,23 +31,29 @@ class KmeansBatch:
         model = KMeans(n_clusters=self.n_clusters)
         model.fit(X)
         # model.fit(X, sample_weight=sample_weight)
-        self.cluster_centers = model.cluster_centers_  # copy clusters
+        self.cluster_centers = torch.tensor(model.cluster_centers_).to(self.config.device)  # copy clusters
         self.is_init = True
 
     def update_cluster(self, X, cluster_idx):
         """ Update clusters in Kmeans on a batch of data """
-        n_samples = X.shape[0]
-        for i in range(n_samples):
-            self.count[cluster_idx] += 1
-            eta = 1.0 / self.count[cluster_idx]
-            updated_cluster = ((1 - eta) * self.cluster_centers[cluster_idx] +
-                               eta * X[i])
-            self.cluster_centers[cluster_idx] = updated_cluster
+        with torch.no_grad():
+            n_samples = X.shape[0]
+            for i in range(n_samples):
+                self.count[cluster_idx] += 1
+                eta = 1.0 / self.count[cluster_idx]
+                updated_cluster = ((1 - eta) * self.cluster_centers[cluster_idx] +
+                                eta * X[i])
+                self.cluster_centers[cluster_idx] = updated_cluster
 
     def assign_cluster(self, X):
         """ Assign samples in `X` to clusters """
-        dis_mat = self._compute_dist(X)
-        return np.argmin(dis_mat, axis=1)
+        cluster_centers = F.normalize(self.cluster_centers, dim=-1)
+        sim = torch.matmul(X, cluster_centers.transpose(0,1))
+        p = F.softmax(sim, dim=-1)
+        return torch.argmax(p, axis=1)
+
+        # detached_X = X.detach().cpu().numpy()
+        # dis_mat = self._compute_dist(detached_X)
 
 
 
@@ -85,9 +91,12 @@ class HeClusTopicModel(nn.Module):
         self.config = config
         self.device = config.device
         # self.bert = BertModel.from_pretrained("bert-base-uncased")
-        self.bert = BertModel.from_pretrained("bert-base-uncased")        
+        self.bert = BertModel.from_pretrained("bert-base-uncased", output_hidden_states=True)   
         self.kmeans = KmeansBatch(config)
         self.ae = AutoEncoder(self.config)    
+        # set bert output layers
+        n_layers = 4
+        self.layers = list(range(-n_layers, 0))
     
     def bert_encode(
             self,
@@ -95,9 +104,13 @@ class HeClusTopicModel(nn.Module):
             attention_mask:torch.Tensor, 
         ):
         # TODO: BERT embedding calculation reconsider
+        # bert_outputs = self.bert(input_ids, attention_mask=attention_mask)
+        # specified_hidden_states = [bert_outputs.hidden_states[i] for i in self.layers]
+        # specified_embeddings = torch.stack(specified_hidden_states, dim=0)
+        # token_embeddings = torch.squeeze(torch.mean(specified_embeddings, dim=0))
         bert_outputs = self.bert(input_ids, attention_mask=attention_mask)
-        last_hidden_states = bert_outputs[0]
-        return last_hidden_states
+        token_embeddings = bert_outputs[0]
+        return token_embeddings
 
 
     def forward(
@@ -105,6 +118,7 @@ class HeClusTopicModel(nn.Module):
             input_ids:torch.Tensor, 
             attention_mask:torch.Tensor, 
             valid_pos:torch.Tensor,
+            bow: torch.Tensor,
             train=True
         ):
         
@@ -114,18 +128,16 @@ class HeClusTopicModel(nn.Module):
         batch_size = len(input_ids)
         valid_mask = valid_pos != 0
         last_hidden_states = self.bert_encode(input_ids, attention_mask)
-        latent_embs = self.ae.encoder(last_hidden_states[valid_pos])
-        valid_ids =  input_ids[valid_mask]
-        valid_ids_set = list(set(valid_ids.view(-1).detach().cpu().numpy()))
+        latent_embs = self.ae.encoder(last_hidden_states[valid_mask]) # shape=(torch.sum(valid_pos), latent_dim)
+        valid_ids =  input_ids[valid_mask] # shape=(torch.sum(valid_pos),)
+        valid_ids_set = list(set(valid_ids.detach().cpu().numpy()))
         
         # calculate averaged latent embeddings
         avg_latent_embs = torch.zeros((len(valid_ids_set), self.config.latent_dim)).to(self.device)
         freq = torch.zeros(len(valid_ids_set), dtype=int).to(self.device)
         # map valid ids to position ids in avg_latent_embs
-        valid_pos_ids = []
-        for ids in valid_ids.detach().cpu().numpy():
-            valid_pos_ids.append(list(map(lambda id_: valid_ids_set.index(id_), ids)))
-        valid_pos_ids = torch.Tensor(valid_pos_ids).dtype(int).to(self.device)
+        valid_pos_ids = [valid_ids_set.index(int(idx.item())) for idx in valid_ids]
+        valid_pos_ids = torch.Tensor(valid_pos_ids).to(torch.int).to(self.device)
         avg_latent_embs.index_add_(0, valid_pos_ids, latent_embs)
         freq.index_add_(0, valid_pos_ids, torch.ones_like(valid_ids))
         avg_latent_embs = avg_latent_embs[freq > 0]
@@ -133,25 +145,20 @@ class HeClusTopicModel(nn.Module):
         avg_latent_embs = avg_latent_embs / freq.unsqueeze(-1)  
 
         # construct co-occur matrix
-        bow_matrix = np.zeros((batch_size, len(valid_ids_set)))
-        for i, ids in enumerate(valid_pos_ids):
-            for id_ in ids:
-                bow_matrix[i][id_.item()] += 1
-        co_matrix = np.zeros((len(valid_ids_set), len(valid_ids_set)))
-        for i in range(len(valid_ids_set)):
-            p_i = np.sum(bow_matrix[:,i]!=0) / batch_size
-            for j in range(i+1, len(valid_ids_set)):
-                p_j = np.sum(bow_matrix[:,j]!=0) / batch_size
-                p_ij = np.sum((bow_matrix[:, i] * bow_matrix[:, j])>0) / batch_size
-                n_p_ij = p_ij / (p_i*p_j)
-                co_matrix[i][j] = n_p_ij
-                co_matrix[j][i] = n_p_ij
+        trans_matrix = torch.zeros(bow.shape[1], len(valid_ids_set)).to(self.device)
+        for i, idx in enumerate(valid_ids_set):
+            trans_matrix[idx, i] = 1
+        bow_matrix = torch.mm(bow, trans_matrix)
+        co_matrix = torch.zeros((len(valid_ids_set), len(valid_ids_set))).to(self.device)
+        p_i = torch.sum(bow_matrix!=0, dim=0) / batch_size
+        p_ij = torch.mm((bow_matrix.t()!=0).to(torch.float), (bow_matrix!=0).to(torch.float)) / batch_size
+        co_matrix = p_ij / p_i.unsqueeze(dim=1) / p_i
 
         # cluster assignments
         cluster_ids = self.kmeans.assign_cluster(avg_latent_embs)
         # if on train mode, update cluster centers
         if train == True: 
-            elem_count = np.bincount(cluster_ids,
+            elem_count = torch.bincount(cluster_ids,
                                      minlength=self.config.n_clusters)
             for k in range(self.config.n_clusters):
                 # avoid empty slicing
@@ -173,10 +180,15 @@ class HeClusTopicModel(nn.Module):
 
     
     def get_loss(self, co_matrix, latent_embs, cluster_ids):
+        '''
+        param: co_matrix: batch token co-occur matrix, shape=(batch_token_size, batch_token_size)
+        param: latent_embs: batch token embeddings, shape=(batch_token_size, latent_dim)
+        param: cluster_ids: batch token cluster id, shape=(batch_token_size,)
+        '''
         batch_size = len(latent_embs)
         # kmeans loss
         kmeans_loss = torch.tensor(0.).to(self.device)
-        cluster_centers = torch.FloatTensor(self.kmeans.cluster_centers).to(self.device)
+        cluster_centers = self.kmeans.cluster_centers.to(self.device)
         for i in range(batch_size):
             diff_vec = latent_embs[i] - cluster_centers[cluster_ids[i]]
             sample_dist_loss = torch.matmul(diff_vec.view(1, -1),
@@ -184,11 +196,16 @@ class HeClusTopicModel(nn.Module):
             kmeans_loss += 0.5 * torch.squeeze(sample_dist_loss)  
 
         # co-occur loss
-        
+        weight_matrix = co_matrix / 10
+        dist_matrix = utils.calc_cosine_dist_torch(latent_embs, latent_embs)
+        co_loss = torch.sum(dist_matrix * weight_matrix / 2)
 
+        total_loss = kmeans_loss + co_loss
+    
         loss = {
             "kmeans_loss": kmeans_loss,
-            "total_loss": kmeans_loss
+            "co_loss": co_loss,
+            "total_loss": total_loss
         } 
 
         return loss
