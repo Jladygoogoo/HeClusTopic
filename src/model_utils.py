@@ -130,14 +130,14 @@ class HeClusTopicModelUtils:
         self._pre_clustering()
 
         utils.freeze_parameters(self.model.bert.parameters())
-        bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
-        utils.unfreeze_parameters(bert_params_for_finetune)
+        # bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
+        # utils.unfreeze_parameters(bert_params_for_finetune)
         bert_params_ids = list(map(id, self.model.bert.parameters()))
         other_params = list(filter(lambda p:id(p) not in bert_params_ids, self.model.parameters()))
 
         train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
         optimizer = torch.optim.Adam([
-            {"params": bert_params_for_finetune, "lr": 1e-5},
+            # {"params": bert_params_for_finetune, "lr": 1e-5},
             {"params": other_params, "lr": self.config.lr}
         ])
         utils.print_log("Start training HeCluTopicModel...")
