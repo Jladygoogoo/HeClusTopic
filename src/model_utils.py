@@ -144,6 +144,7 @@ class HeClusTopicModelUtils:
         batch_size = self.config.batch_size
         for epoch in range(self.config.n_epochs):
             total_loss = 0
+            rec_loss = 0
             kmeans_loss = 0
             co_loss = 0
             for batch in tqdm(train_dataloader):
@@ -152,15 +153,16 @@ class HeClusTopicModelUtils:
                 attention_mask = batch[1].to(self.device)
                 valid_pos = batch[2].to(self.device)
                 bow = batch[3].to(self.device)
-                valid_ids_set, co_matrix, avg_latent_embs, cluster_ids = self.model(input_ids, attention_mask, valid_pos, bow)
-                loss = self.model.get_loss(co_matrix, avg_latent_embs, cluster_ids)
+                valid_ids_set, co_matrix, bert_embs, bert_embs_rec, avg_latent_embs, cluster_ids = self.model(input_ids, attention_mask, valid_pos, bow)
+                loss = self.model.get_loss(bert_embs, bert_embs_rec, co_matrix, avg_latent_embs, cluster_ids)
                 total_loss += loss["total_loss"].item()
+                rec_loss += loss["rec_loss"].item()
                 kmeans_loss += loss["kmeans_loss"].item()
                 co_loss += loss["co_loss"].item()
                 loss["total_loss"].backward()
                 optimizer.step()              
-            utils.print_log("Epoch-{}: total loss={:.4f} | kmeans loss={:.4f} | co loss={:.4f}".format(
-                epoch, total_loss/batch_size, kmeans_loss/batch_size, co_loss/batch_size
+            utils.print_log("Epoch-{}: total loss={:.4f} | rec loss={:.4f} | kmeans loss={:.4f} | co loss={:.4f}".format(
+                epoch, total_loss/batch_size, rec_loss/batch_size, kmeans_loss/batch_size, co_loss/batch_size
             ))
             if (epoch+1) % 1 == 0:
                 self.show_clusters()

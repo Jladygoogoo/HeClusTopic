@@ -45,6 +45,7 @@ class KmeansBatch:
                                 eta * X[i])
                 self.cluster_centers[cluster_idx] = updated_cluster
 
+
     def assign_cluster(self, X):
         """ Assign samples in `X` to clusters """
         cluster_centers = F.normalize(self.cluster_centers, dim=-1)
@@ -81,7 +82,7 @@ class AutoEncoder(nn.Module):
         z = self.encoder(x)
         z = F.normalize(z, dim=-1)
         x_rec = self.decoder(z)
-        return x_rec    
+        return x_rec, z    
 
 
 
@@ -127,8 +128,9 @@ class HeClusTopicModel(nn.Module):
         '''
         batch_size = len(input_ids)
         valid_mask = valid_pos != 0
-        last_hidden_states = self.bert_encode(input_ids, attention_mask)
-        latent_embs = self.ae.encoder(last_hidden_states[valid_mask]) # shape=(torch.sum(valid_pos), latent_dim)
+        bert_embs = self.bert_encode(input_ids, attention_mask)
+        bert_embs = bert_embs[valid_mask]
+        bert_embs_rec, latent_embs = self.ae(bert_embs) # shape=(torch.sum(valid_pos), latent_dim)
         valid_ids =  input_ids[valid_mask] # shape=(torch.sum(valid_pos),)
         valid_ids_set = list(set(valid_ids.detach().cpu().numpy()))
         
@@ -166,7 +168,7 @@ class HeClusTopicModel(nn.Module):
                     continue
                 self.kmeans.update_cluster(avg_latent_embs[cluster_ids == k], k)
 
-        return valid_ids_set, co_matrix, avg_latent_embs, cluster_ids
+        return valid_ids_set, co_matrix, bert_embs, bert_embs_rec, avg_latent_embs, cluster_ids
 
 
     def get_latent_emb(self, input_ids, attention_mask, valid_pos=None):
@@ -179,13 +181,16 @@ class HeClusTopicModel(nn.Module):
         return latent_embs
 
     
-    def get_loss(self, co_matrix, latent_embs, cluster_ids):
+    def get_loss(self, bert_embs, bert_embs_rec, co_matrix, latent_embs, cluster_ids):
         '''
         param: co_matrix: batch token co-occur matrix, shape=(batch_token_size, batch_token_size)
         param: latent_embs: batch token embeddings, shape=(batch_token_size, latent_dim)
         param: cluster_ids: batch token cluster id, shape=(batch_token_size,)
         '''
         batch_size = len(latent_embs)
+        # rec loss
+        rec_loss = F.mse_loss(bert_embs_rec, bert_embs)
+
         # kmeans loss
         kmeans_loss = torch.tensor(0.).to(self.device)
         cluster_centers = self.kmeans.cluster_centers.to(self.device)
@@ -200,9 +205,10 @@ class HeClusTopicModel(nn.Module):
         dist_matrix = utils.calc_cosine_dist_torch(latent_embs, latent_embs)
         co_loss = torch.sum(dist_matrix * weight_matrix / 2)
 
-        total_loss = kmeans_loss + co_loss
+        total_loss = rec_loss + kmeans_loss + co_loss
     
         loss = {
+            "rec_loss": rec_loss,
             "kmeans_loss": kmeans_loss,
             "co_loss": co_loss,
             "total_loss": total_loss
