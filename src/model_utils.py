@@ -1,4 +1,5 @@
 import wandb
+from datetime import datetime
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -130,22 +131,24 @@ class HeClusTopicModelUtils:
         self.model.to(self.device)
         self._pretrain_ae()
         self._pre_clustering()
-        self.show_clusters()
+        self.show_clusters(save=True, suffix="init")
 
         utils.freeze_parameters(self.model.bert.parameters())
-        # bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
-        # utils.unfreeze_parameters(bert_params_for_finetune)
+        bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
+        utils.unfreeze_parameters(bert_params_for_finetune)
         bert_params_ids = list(map(id, self.model.bert.parameters()))
         other_params = list(filter(lambda p:id(p) not in bert_params_ids, self.model.parameters()))
 
         train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
         optimizer = torch.optim.Adam([
-            # {"params": bert_params_for_finetune, "lr": 1e-5},
+            {"params": bert_params_for_finetune, "lr": 1e-5},
             {"params": other_params, "lr": self.config.lr}
         ])
         utils.print_log("Start training HeCluTopicModel...")
-        # wandb.watch(models=(self.model.ae, self.model.bert.encoder.layer[11]))
+        if self.config.wandb == True:
+            wandb.watch(models=(self.model.ae, self.model.bert.encoder.layer[11]), log_freq=1)
         batch_size = self.config.batch_size
+        step = 0
         for epoch in range(self.config.n_epochs):
             total_loss = 0
             rec_loss = 0
@@ -164,34 +167,61 @@ class HeClusTopicModelUtils:
                 kmeans_loss += loss["kmeans_loss"].item()
                 co_loss += loss["co_loss"].item()
                 loss["total_loss"].backward()
-                optimizer.step()              
+                optimizer.step()
+                if (step+1) % self.config.wandb_log_interval == 0:
+                    utils.wandb_log(
+                        "train/loss", 
+                        {
+                            "total_loss": loss["total_loss"].item(),
+                            "rec_loss": loss["rec_loss"].item(),
+                            "kmeans_loss": loss["kmeans_loss"].item(),
+                            "co_loss": loss["co_loss"].item(),
+                        },
+                        self.config.wandb)
+                step += 1
             utils.print_log("Epoch-{}: total loss={:.4f} | rec loss={:.4f} | kmeans loss={:.4f} | co loss={:.4f}".format(
                 epoch, total_loss/batch_size, rec_loss/batch_size, kmeans_loss/batch_size, co_loss/batch_size
             ))
             if (epoch+1) % 1 == 0:
-                self.show_clusters()
+                self.show_clusters(save=True, suffix="{}".format(epoch+1))
         # torch.save(self.model.state_dict(), pretrained_path)
         # utils.print_log(f"Pretrained model saved to {pretrained_path}")
 
 
-    def show_clusters(self):
+    def show_clusters(self, save=False, suffix=""):
         '''
-        Show vocab clustering results.
+        Show and save vocab clustering results.
+        param: mode: "print"|"save"|"all"
         '''
+        if len(suffix)>0: 
+            suffix = "_{}".format(suffix)
+
         utils.print_log("Showing clusters results...")
         if self.model.kmeans.is_init == False:
             utils.print_log("None. Kmeans should be initiated first.")
+
         valid_ids, latent_embs = self.get_vocab_emb(return_freq=False)
-        print(len(valid_ids), len(latent_embs))
         labels_prob = self.model.kmeans.assign_cluster(latent_embs, mode="soft")
         _, topk_id_mtx = torch.topk(labels_prob.t(), dim=1, k=20)
         valid_ids = valid_ids.detach().cpu().numpy()
         topk_id_mtx = topk_id_mtx.detach().cpu().numpy()
         utils.print_log("Clusters size={}, valid vocab size={}".format(len(topk_id_mtx), len(valid_ids)))
-
+        
+        # display and save
+        topic_tokens = []
         for i in range(len(topk_id_mtx)):
-            tokens = [self.inv_vocab[int(valid_ids[id_])] for id_ in topk_id_mtx[i]]
-            print("topic-{}: {}".format(i, ",".join(tokens)))
+            topic_tokens.append([self.inv_vocab[int(valid_ids[id_])] for id_ in topk_id_mtx[i]])
+        for i, tokens in enumerate(topic_tokens):
+            print("topic-{}: {}".format(i, ','.join(tokens)))
+        if save == True:
+            save_path = "results/{}/topics{}.txt".format(self.config.dataset, suffix)
+            if not os.path.exists(os.path.dirname(save_path)):
+                os.makedirs(os.path.dirname(save_path))
+            with open(save_path, 'w') as f:
+                for i, tokens in enumerate(topic_tokens):
+                    f.write("topic-{}: {}\n".format(i, ','.join(tokens)))                
+                
+            
 
         
 
@@ -210,9 +240,9 @@ if __name__ == '__main__':
     parser.add_argument('--latent_dim', default=256, type=int, help='latent embedding dimention')
     parser.add_argument('--n_epochs', default=20, type=int, help='number of epochs for clustering')
     parser.add_argument('--n_pre_epochs', default=20, type=int, help='number of epochs for pretraining autoencoder')
-    # parser.add_argument('--kappa', default=10, type=float, help='concentration parameter kappa')
-    # parser.add_argument('--hidden_dims', default='[500, 500, 1000, 100]', type=str)
+    parser.add_argument("--wandb_log_interval", default=50, type=int)
     parser.add_argument('--train', action='store_true')
+    parser.add_argument("--wandb", action="store_true", help="whether to log at wandb")
     parser.add_argument('--cluster_weight', default=0.1, type=float, help='weight of clustering loss')
     parser.add_argument('--emb_weight', default=0.0, type=float, help='weight of document embedding reconstruct loss')
     parser.add_argument('--bow_weight', default=1.0, type=float, help='weight of document bow reconstruct loss')
@@ -226,7 +256,8 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # wandb.init(project="HeClusTopicModel")
+    if args.wandb:
+        wandb.init(project="HeClusTopicModel", name=datetime.now().strftime("%y-%m-%d %H:%M:%S"))
 
     he_clus_utiler = HeClusTopicModelUtils(args)
     

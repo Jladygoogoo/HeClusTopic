@@ -1,3 +1,4 @@
+import wandb
 import pynvml
 import pickle
 from datetime import datetime
@@ -127,6 +128,17 @@ def nvidia_info():
             pass
     return nvidia_dict
 
+
+def wandb_log(title, log_dict, use_wandb=True):
+    '''
+    Wrap wandb.log function.
+    param: title: str like "train/mertic"
+    param: log_dict: dict like {"f1": 0.981, "acc": 0.996}
+    param: use_wandb: is use_wandb is False, then do nothing
+    '''
+    if use_wandb == True:
+        new_log_dict = {"{}/{}".format(title, k): v for k,v in log_dict.items()}
+        wandb.log(new_log_dict)
 
 
 def check_gpu_mem_usedRate():
