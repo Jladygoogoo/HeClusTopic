@@ -1,3 +1,4 @@
+import wandb
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
@@ -94,7 +95,7 @@ class HeClusTopicModelUtils:
         latent_embs = torch.zeros((len(self.vocab), self.config.latent_dim)).to(self.device)
         freq = torch.zeros(len(self.vocab), dtype=int).to(self.device)
         with torch.no_grad():
-            for batch in tqdm(dataloader):
+            for i, batch in enumerate(tqdm(dataloader)):
                 input_ids = batch[0].to(self.device)
                 attention_mask = batch[1].to(self.device)
                 valid_pos = batch[2].to(self.device)
@@ -102,12 +103,13 @@ class HeClusTopicModelUtils:
                 valid_ids = input_ids[valid_pos != 0]
                 latent_embs.index_add_(0, valid_ids, latent_emb)
                 freq.index_add_(0, valid_ids, torch.ones_like(valid_ids))
+        valid_ids_final = torch.where(freq>0)[0]
         latent_embs = latent_embs[freq > 0]
         freq = freq[freq > 0]
         latent_embs = latent_embs / freq.unsqueeze(-1)
         if return_freq == True:
-            return latent_embs, freq
-        return latent_embs
+            return valid_ids_final, latent_embs, freq
+        return valid_ids_final, latent_embs
 
 
     def _pre_clustering(self):
@@ -128,6 +130,7 @@ class HeClusTopicModelUtils:
         self.model.to(self.device)
         self._pretrain_ae()
         self._pre_clustering()
+        self.show_clusters()
 
         utils.freeze_parameters(self.model.bert.parameters())
         # bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
@@ -141,6 +144,7 @@ class HeClusTopicModelUtils:
             {"params": other_params, "lr": self.config.lr}
         ])
         utils.print_log("Start training HeCluTopicModel...")
+        # wandb.watch(models=(self.model.ae, self.model.bert.encoder.layer[11]))
         batch_size = self.config.batch_size
         for epoch in range(self.config.n_epochs):
             total_loss = 0
@@ -177,18 +181,17 @@ class HeClusTopicModelUtils:
         utils.print_log("Showing clusters results...")
         if self.model.kmeans.is_init == False:
             utils.print_log("None. Kmeans should be initiated first.")
-        latent_embs, freq = self.get_vocab_emb()
-        labels = self.model.kmeans.assign_cluster(latent_embs).detach().cpu().numpy()
-        label_2_vids = {}
-        for i, label in enumerate(labels):
-            if label in label_2_vids:
-                label_2_vids[label].append(i)
-            else:
-                label_2_vids[label] = [i]
-        for label, vids in label_2_vids.items():
-            print("=========== cluster-{} ===========".format(label))
-            tokens = [self.inv_vocab[vid] for vid in vids if vid not in self.data["filter_ids"]]
-            print(tokens)
+        valid_ids, latent_embs = self.get_vocab_emb(return_freq=False)
+        print(len(valid_ids), len(latent_embs))
+        labels_prob = self.model.kmeans.assign_cluster(latent_embs, mode="soft")
+        _, topk_id_mtx = torch.topk(labels_prob.t(), dim=1, k=20)
+        valid_ids = valid_ids.detach().cpu().numpy()
+        topk_id_mtx = topk_id_mtx.detach().cpu().numpy()
+        utils.print_log("Clusters size={}, valid vocab size={}".format(len(topk_id_mtx), len(valid_ids)))
+
+        for i in range(len(topk_id_mtx)):
+            tokens = [self.inv_vocab[int(valid_ids[id_])] for id_ in topk_id_mtx[i]]
+            print("topic-{}: {}".format(i, ",".join(tokens)))
 
         
 
@@ -222,6 +225,8 @@ if __name__ == '__main__':
     torch.cuda.manual_seed_all(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+    # wandb.init(project="HeClusTopicModel")
 
     he_clus_utiler = HeClusTopicModelUtils(args)
     

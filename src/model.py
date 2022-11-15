@@ -46,15 +46,16 @@ class KmeansBatch:
                 self.cluster_centers[cluster_idx] = updated_cluster
 
 
-    def assign_cluster(self, X):
+    def assign_cluster(self, X, mode="hard"):
         """ Assign samples in `X` to clusters """
         cluster_centers = F.normalize(self.cluster_centers, dim=-1)
         sim = torch.matmul(X, cluster_centers.transpose(0,1))
         p = F.softmax(sim, dim=-1)
-        return torch.argmax(p, axis=1)
+        if mode == "hard":
+            return torch.argmax(p, axis=1)
+        elif mode == "soft":
+            return p
 
-        # detached_X = X.detach().cpu().numpy()
-        # dis_mat = self._compute_dist(detached_X)
 
 
 
