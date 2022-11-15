@@ -176,8 +176,7 @@ class HeClusTopicModelUtils:
         if self.model.kmeans.is_init == False:
             utils.print_log("None. Kmeans should be initiated first.")
         latent_embs, freq = self.get_vocab_emb()
-        labels = self.model.kmeans.assign_cluster(latent_embs)
-        print(labels.shape)
+        labels = self.model.kmeans.assign_cluster(latent_embs).detach().cpu().numpy()
         label_2_vids = {}
         for i, label in enumerate(labels):
             if label in label_2_vids:
