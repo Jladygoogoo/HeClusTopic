@@ -29,8 +29,8 @@ class KmeansBatch:
     def init_cluster(self, X, sample_weight=None):
         """ Generate initial clusters using sklearn.Kmeans """
         model = KMeans(n_clusters=self.n_clusters)
-        model.fit(X)
-        # model.fit(X, sample_weight=sample_weight)
+        # model.fit(X)
+        model.fit(X, sample_weight=sample_weight)
         self.cluster_centers = torch.tensor(model.cluster_centers_).to(self.config.device)  # copy clusters
         self.is_init = True
 
