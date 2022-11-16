@@ -135,7 +135,7 @@ class HeClusTopicModelUtils:
         self.model.vocab_weights = utils.assign_weight_from_freq(self.vocab_freq, self.device)
 
         utils.print_log(f"Running K-Means for initialization...")
-        self.model.kmeans.init_cluster(latent_embs.cpu().numpy()[:200], sample_weight=freq.cpu().numpy()[:200])
+        self.model.kmeans.init_cluster(latent_embs.cpu().numpy(), sample_weight=freq.cpu().numpy())
 
 
     def train(self):
@@ -143,7 +143,7 @@ class HeClusTopicModelUtils:
         self.model.to(self.device)
         self._pretrain_ae()
         self._pre_clustering()
-        # self.show_clusters(save=True, suffix="init")
+        self.show_clusters(save=True, suffix="init")
 
         utils.freeze_parameters(self.model.bert.parameters())
         bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
