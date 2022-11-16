@@ -34,15 +34,15 @@ class KmeansBatch:
         self.cluster_centers = torch.tensor(model.cluster_centers_).to(self.config.device)  # copy clusters
         self.is_init = True
 
-    def update_cluster(self, X, cluster_idx):
+    def update_cluster(self, latent_embs, cluster_idx, weights):
         """ Update clusters in Kmeans on a batch of data """
         with torch.no_grad():
-            n_samples = X.shape[0]
+            n_samples = latent_embs.shape[0]
             for i in range(n_samples):
                 self.count[cluster_idx] += 1
-                eta = 1.0 / self.count[cluster_idx]
+                eta = 1.0 / self.count[cluster_idx] * weights[i]
                 updated_cluster = ((1 - eta) * self.cluster_centers[cluster_idx] +
-                                eta * X[i])
+                                eta * latent_embs[i])
                 self.cluster_centers[cluster_idx] = updated_cluster
 
 
@@ -92,13 +92,13 @@ class HeClusTopicModel(nn.Module):
         super().__init__()
         self.config = config
         self.device = config.device
-        # self.bert = BertModel.from_pretrained("bert-base-uncased")
         self.bert = BertModel.from_pretrained("bert-base-uncased", output_hidden_states=True)   
         self.kmeans = KmeansBatch(config)
         self.ae = AutoEncoder(self.config)    
         # set bert output layers
         n_layers = 4
         self.layers = list(range(-n_layers, 0))
+        self.vocab_weights = None # initialized in _pre_clustering()
     
     def bert_encode(
             self,
@@ -167,7 +167,8 @@ class HeClusTopicModel(nn.Module):
                 # avoid empty slicing
                 if elem_count[k] == 0:
                     continue
-                self.kmeans.update_cluster(avg_latent_embs[cluster_ids == k], k)
+                weights = self.vocab_weights[torch.tensor(valid_ids_set, dtype=torch.long)[cluster_ids == k]]
+                self.kmeans.update_cluster(avg_latent_embs[cluster_ids == k], k, weights)
 
         return valid_ids_set, co_matrix, bert_embs, bert_embs_rec, avg_latent_embs, cluster_ids
 
@@ -182,24 +183,28 @@ class HeClusTopicModel(nn.Module):
         return latent_embs
 
     
-    def get_loss(self, bert_embs, bert_embs_rec, co_matrix, latent_embs, cluster_ids):
+    def get_loss(self, valid_ids_set, bert_embs, bert_embs_rec, co_matrix, latent_embs, cluster_ids):
         '''
-        param: co_matrix: batch token co-occur matrix, shape=(batch_token_size, batch_token_size)
-        param: latent_embs: batch token embeddings, shape=(batch_token_size, latent_dim)
-        param: cluster_ids: batch token cluster id, shape=(batch_token_size,)
+        param: valid_ids_set: valid token input ids, len(valid_ids_set) = valid_token_size
+        param: co_matrix: valid token co-occur matrix, shape=(valid_token_size, valid_token_size)
+        param: latent_embs: valid token embeddings, shape=(valid_token_size, latent_dim)
+        param: cluster_ids: valid token cluster id, shape=(valid_token_size,)
         '''
-        batch_size = len(latent_embs)
+        valid_size = len(latent_embs)
         # rec loss
         rec_loss = F.mse_loss(bert_embs_rec, bert_embs)
 
         # kmeans loss
         kmeans_loss = torch.tensor(0.).to(self.device)
         cluster_centers = self.kmeans.cluster_centers.to(self.device)
-        for i in range(batch_size):
-            diff_vec = latent_embs[i] - cluster_centers[cluster_ids[i]]
-            sample_dist_loss = torch.matmul(diff_vec.view(1, -1),
-                                            diff_vec.view(-1, 1))
-            kmeans_loss += 0.5 * torch.squeeze(sample_dist_loss)  
+        cosine_dist = utils.calc_cosine_dist_torch(latent_embs, cluster_centers[cluster_ids], mode="o2o")
+        token_weights = self.vocab_weights[valid_ids_set]
+        kmeans_loss = torch.mm(cosine_dist.unsqueeze(dim=0), token_weights.unsqueeze(dim=1)) # tokens with higher frequncey will cause more significant impacts
+        # for i in range(valid_size):
+        #     diff_vec = latent_embs[i] - cluster_centers[cluster_ids[i]]
+        #     sample_dist_loss = torch.matmul(diff_vec.view(1, -1),
+        #                                     diff_vec.view(-1, 1))
+        #     kmeans_loss += 0.5 * torch.squeeze(sample_dist_loss)  
 
         # co-occur loss
         weight_matrix = co_matrix / 10

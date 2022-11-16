@@ -76,7 +76,7 @@ class HeClusTopicModelUtils:
                     input_ids = batch[0].to(self.device)
                     attention_mask = batch[1].to(self.device)
                     x = self.model.bert_encode(input_ids, attention_mask)
-                    x_rec = ae(x)
+                    x_rec, _ = ae(x)
                     loss = F.mse_loss(x, x_rec)
                     loss.backward()
                     optimizer.step()
@@ -90,6 +90,9 @@ class HeClusTopicModelUtils:
     def get_vocab_emb(self, return_freq=True):
         '''
         Get vocab's average embeddings based on current model.
+        return: valid_ids_final: valid token ids, len(valid_ids_final) <= len(self.vocab)
+        return: latent_embs: valid token latent embeddings, shape=(len(valid_ids_final), latent_dim)
+        return: freq: valid token freqencies, shape=(len(valid_ids_final),)
         '''
         self.model.bert.eval()
         dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
@@ -114,16 +117,25 @@ class HeClusTopicModelUtils:
 
 
     def _pre_clustering(self):
+        '''
+        Clusters initialization
+        '''
         init_latent_emb_path = os.path.join(self.data_dir, "init_latent_emb.pt")
         if os.path.exists(init_latent_emb_path):
             utils.print_log(f"Loading initial latent embeddings from {init_latent_emb_path}.")
-            latent_embs, freq = torch.load(init_latent_emb_path)
+            valid_ids_final, latent_embs, freq = torch.load(init_latent_emb_path)
         else:
-            latent_embs, freq = self.get_vocab_emb()
+            valid_ids_final, latent_embs, freq = self.get_vocab_emb()
             utils.print_log(f"Saving initial embeddings to {init_latent_emb_path}.")
-            torch.save((latent_embs, freq), init_latent_emb_path)
+            torch.save((valid_ids_final, latent_embs, freq), init_latent_emb_path)
+
+        # initialize vocab frequencies
+        self.vocab_freq = torch.zeros(len(self.vocab)).to(self.device)
+        self.vocab_freq.index_add_(0, valid_ids_final.to(torch.int), freq.to(torch.float))
+        self.model.vocab_weights = utils.assign_weight_from_freq(self.vocab_freq, self.device)
+
         utils.print_log(f"Running K-Means for initialization...")
-        self.model.kmeans.init_cluster(latent_embs.numpy(), sample_weight=freq.numpy())
+        self.model.kmeans.init_cluster(latent_embs.cpu().numpy()[:200], sample_weight=freq.cpu().numpy()[:200])
 
 
     def train(self):
@@ -131,7 +143,7 @@ class HeClusTopicModelUtils:
         self.model.to(self.device)
         self._pretrain_ae()
         self._pre_clustering()
-        self.show_clusters(save=True, suffix="init")
+        # self.show_clusters(save=True, suffix="init")
 
         utils.freeze_parameters(self.model.bert.parameters())
         bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
@@ -161,7 +173,7 @@ class HeClusTopicModelUtils:
                 valid_pos = batch[2].to(self.device)
                 bow = batch[3].to(self.device)
                 valid_ids_set, co_matrix, bert_embs, bert_embs_rec, avg_latent_embs, cluster_ids = self.model(input_ids, attention_mask, valid_pos, bow)
-                loss = self.model.get_loss(bert_embs, bert_embs_rec, co_matrix, avg_latent_embs, cluster_ids)
+                loss = self.model.get_loss(valid_ids_set, bert_embs, bert_embs_rec, co_matrix, avg_latent_embs, cluster_ids)
                 total_loss += loss["total_loss"].item()
                 rec_loss += loss["rec_loss"].item()
                 kmeans_loss += loss["kmeans_loss"].item()
@@ -188,7 +200,7 @@ class HeClusTopicModelUtils:
         # utils.print_log(f"Pretrained model saved to {pretrained_path}")
 
 
-    def show_clusters(self, save=False, suffix=""):
+    def show_clusters(self, save=False, visual=True, suffix=""):
         '''
         Show and save vocab clustering results.
         param: mode: "print"|"save"|"all"
@@ -217,9 +229,15 @@ class HeClusTopicModelUtils:
             save_path = "results/{}/topics{}.txt".format(self.config.dataset, suffix)
             if not os.path.exists(os.path.dirname(save_path)):
                 os.makedirs(os.path.dirname(save_path))
-            with open(save_path, 'w') as f:
+            with open(save_path, 'w', encoding='utf8') as f:
                 for i, tokens in enumerate(topic_tokens):
-                    f.write("topic-{}: {}\n".format(i, ','.join(tokens)))                
+                    f.write("topic-{}: {}\n".format(i, ','.join(tokens))) 
+
+        # visualize
+        if visual == True:
+            # use t-sne to visualize latent embeddings
+            utils.tsne_vis(latent_embs.detach().cpu().numpy(), 
+                fig_save_path=os.path.join("results", self.config.dataset, "tsne{}.png".format(suffix)))
                 
             
 

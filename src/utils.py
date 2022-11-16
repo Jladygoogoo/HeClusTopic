@@ -14,6 +14,9 @@ from nltk.tag import pos_tag
 from sklearn.cluster import KMeans
 import numpy as np
 from sklearn.metrics.cluster import normalized_mutual_info_score
+from sklearn import metrics, manifold
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 
 def _parallel_compute_distance(X, cluster):
@@ -157,11 +160,56 @@ def unfreeze_parameters(parameters):
     for p in parameters:
         p.requires_grad = True
 
-def calc_cosine_dist_torch(a, b):
+def calc_cosine_dist_torch(a, b, mode="m2m"):
+    '''
+    Calculate consine distance between two matrix.
+    param: a: torch.Tensor, shape=(size_a, latent_dim)
+    param: b: torch.Tensor, shape=(size_b, latent_dim)
+    param: mode: "o2o"|"m2m"
+    return: res, shape=(size_a, size_b)-"m2m", shape=(size_a)="o2o"
+    '''
     a_norm = a / a.norm(dim=1)[:, None]
     b_norm = b / b.norm(dim=1)[:, None]
-    res = torch.mm(a_norm, b_norm.transpose(0,1))    
+    if mode == "m2m":
+        res = torch.mm(a_norm, b_norm.transpose(0,1))    
+    elif mode == "o2o":
+        if a_norm.shape != b_norm.shape:
+            raise ValueError("a.shape and b.shape should be identical under 'o2o' mode.")
+        res = torch.sum(a_norm * b_norm, dim=1)
     return res
+
+
+def assign_weight_from_freq(vocab_freq, device):
+    q = torch.tensor([0.25, 0.5, 0.75]).to(device)
+    ql = torch.quantile(vocab_freq, q) # shape=(3,)
+    vocab_weight = torch.zeros_like(vocab_freq).to(device)
+    vocab_weight[torch.where(vocab_freq<=ql[0])] = 0.1
+    vocab_weight[torch.where(vocab_freq>ql[0])] = 0.25
+    vocab_weight[torch.where(vocab_freq>ql[1])] = 0.5
+    vocab_weight[torch.where(vocab_freq>ql[2])] = 1.0
+    return vocab_weight
+
+
+def tsne_vis(features, fig_save_path):
+    # 建模
+    tsne = manifold.TSNE(n_components=2, init='pca', random_state=21) # tsne模型
+    X_tsne = tsne.fit_transform(features)
+
+    # 绘图
+    x_min, x_max = X_tsne.min(0), X_tsne.max(0)
+    X_norm = (X_tsne - x_min) / (x_max - x_min)  # 归一化
+    plt.figure(figsize=(8, 8))
+
+    # plt.scatter(X_norm[:,0], X_norm[:,1], c=labels, cmap=plt.cm.tab20b)
+    plt.scatter(X_norm[:,0], X_norm[:,1])
+
+    plt.xticks([])
+    plt.yticks([])
+    # plt.show()
+    plt.savefig(fig_save_path)
+
+
+
 
 
 if __name__ == "__main__":
