@@ -15,7 +15,7 @@ class KmeansBatch:
         self.n_features = config.latent_dim
         self.n_clusters = config.n_clusters
         self.cluster_centers = np.zeros((self.n_clusters, self.n_features))
-        self.count = 100 * np.ones((self.n_clusters))  # serve as learning rate
+        self.count = 50 * np.ones((self.n_clusters))  # serve as learning rate
         self.is_init = False
 
     def _compute_dist(self, X):
@@ -190,7 +190,6 @@ class HeClusTopicModel(nn.Module):
         param: latent_embs: valid token embeddings, shape=(valid_token_size, latent_dim)
         param: cluster_ids: valid token cluster id, shape=(valid_token_size,)
         '''
-        valid_size = len(latent_embs)
         # rec loss
         rec_loss = F.mse_loss(bert_embs_rec, bert_embs)
 
@@ -200,11 +199,6 @@ class HeClusTopicModel(nn.Module):
         cosine_dist = utils.calc_cosine_dist_torch(latent_embs, cluster_centers[cluster_ids], mode="o2o")
         token_weights = self.vocab_weights[valid_ids_set]
         kmeans_loss = torch.mm(cosine_dist.unsqueeze(dim=0), token_weights.unsqueeze(dim=1)) # tokens with higher frequncey will cause more significant impacts
-        # for i in range(valid_size):
-        #     diff_vec = latent_embs[i] - cluster_centers[cluster_ids[i]]
-        #     sample_dist_loss = torch.matmul(diff_vec.view(1, -1),
-        #                                     diff_vec.view(-1, 1))
-        #     kmeans_loss += 0.5 * torch.squeeze(sample_dist_loss)  
 
         # co-occur loss
         weight_matrix = co_matrix / 10

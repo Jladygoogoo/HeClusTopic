@@ -183,15 +183,15 @@ def assign_weight_from_freq(vocab_freq, device):
     q = torch.tensor([0.25, 0.5, 0.75]).to(device)
     ql = torch.quantile(vocab_freq, q) # shape=(3,)
     vocab_weight = torch.zeros_like(vocab_freq).to(device)
-    vocab_weight[torch.where(vocab_freq<=ql[0])] = 0.1
-    vocab_weight[torch.where(vocab_freq>ql[0])] = 0.25
-    vocab_weight[torch.where(vocab_freq>ql[1])] = 0.5
+    vocab_weight[torch.where(vocab_freq<=ql[0])] = 0.05
+    vocab_weight[torch.where(vocab_freq>ql[0])] = 0.1
+    vocab_weight[torch.where(vocab_freq>ql[1])] = 0.25
     vocab_weight[torch.where(vocab_freq>ql[2])] = 1.0
     return vocab_weight
 
 
 def tsne_vis(features, fig_save_path):
-    # 建模
+    print_log("Drawing T-SNE visualization...")
     tsne = manifold.TSNE(n_components=2, init='pca', random_state=21) # tsne模型
     X_tsne = tsne.fit_transform(features)
 
@@ -207,6 +207,7 @@ def tsne_vis(features, fig_save_path):
     plt.yticks([])
     # plt.show()
     plt.savefig(fig_save_path)
+    print_log("T-SNE result saved to: {}".format(fig_save_path))
 
 
 

@@ -61,7 +61,7 @@ class HeClusTopicModelUtils:
         ae_model_path = os.path.join(self.data_dir, "ae.pt")
         if os.path.exists(ae_model_path):
             utils.print_log("Found existed AutoEncoder model in: {}".format(ae_model_path))
-            ae.load_state_dict(torch.load(os.path.join(self.data_dir, "ae.pt")))
+            ae.load_state_dict(torch.load(os.path.join(self.data_dir, "ae.pt"), map_location=self.device))
         else:
             train_dataloader = DataLoader(self.dataset, batch_size=self.config.batch_size)
             # freeze BERT parameters when pretraining Autoencoder
@@ -123,7 +123,7 @@ class HeClusTopicModelUtils:
         init_latent_emb_path = os.path.join(self.data_dir, "init_latent_emb.pt")
         if os.path.exists(init_latent_emb_path):
             utils.print_log(f"Loading initial latent embeddings from {init_latent_emb_path}.")
-            valid_ids_final, latent_embs, freq = torch.load(init_latent_emb_path)
+            valid_ids_final, latent_embs, freq = torch.load(init_latent_emb_path, map_location=self.device)
         else:
             valid_ids_final, latent_embs, freq = self.get_vocab_emb()
             utils.print_log(f"Saving initial embeddings to {init_latent_emb_path}.")
@@ -143,7 +143,7 @@ class HeClusTopicModelUtils:
         self.model.to(self.device)
         self._pretrain_ae()
         self._pre_clustering()
-        self.show_clusters(save=True, suffix="init")
+        # self.show_clusters(save=True, suffix="init")
 
         utils.freeze_parameters(self.model.bert.parameters())
         bert_params_for_finetune = [p for n,p in self.model.bert.named_parameters() if "layer.11" in n]
@@ -158,7 +158,7 @@ class HeClusTopicModelUtils:
         ])
         utils.print_log("Start training HeCluTopicModel...")
         if self.config.wandb == True:
-            wandb.watch(models=(self.model.ae, self.model.bert.encoder.layer[11]), log_freq=1)
+            wandb.watch(models=self.model, log_freq=1)
         batch_size = self.config.batch_size
         step = 0
         for epoch in range(self.config.n_epochs):
@@ -255,7 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_clusters', default=100, type=int, help='number of topics')
     parser.add_argument('--k', default=10, type=int, help='number of top words to display per topic')
     parser.add_argument('--bert_dim', default=768, type=int, help='embedding dimention of pretrained language model')
-    parser.add_argument('--latent_dim', default=256, type=int, help='latent embedding dimention')
+    parser.add_argument('--latent_dim', default=128, type=int, help='latent embedding dimention')
     parser.add_argument('--n_epochs', default=20, type=int, help='number of epochs for clustering')
     parser.add_argument('--n_pre_epochs', default=20, type=int, help='number of epochs for pretraining autoencoder')
     parser.add_argument("--wandb_log_interval", default=50, type=int)
